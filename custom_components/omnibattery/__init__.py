@@ -10392,8 +10392,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _device_owns_initial_config(brand: str) -> bool:
-    """Return whether setup must preserve configuration stored by the device."""
-    return brand == "zendure"
+    """Return whether setup must not push battery configuration to hardware."""
+    # Zendure stores its SOC limits in device flash. KOSTAL is explicitly
+    # monitor-only: the PLENTICORE remains the sole owner of BYD operation.
+    return brand in ("zendure", "kostal")
 
 
 _LEGACY_ACTIVE_BALANCE_PREFIX = "active_balance_mode_"
