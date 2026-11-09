@@ -27,6 +27,7 @@ from ..drivers.anker import AnkerModbusDriver
 from ..drivers.sessy import SessyLocalDriver
 from ..drivers.hoymiles import HoymilesMqttDriver
 from ..drivers.huawei import HuaweiSolarDriver
+from ..drivers.kostal import KostalPlenticoreDriver
 from ..drivers.base import SetpointResult
 from ..backup_discharge_store import BackupDischargeEnergyStore
 from ..energy import BackupDischargeAccumulator
@@ -492,7 +493,17 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # packet correction; the coordinator and platform setups read the
         # per-platform definition lists back from it (see the passthrough
         # properties below) instead of branching on the version string.
-        if self.brand == "zendure":
+        if self.brand == "kostal":
+            # KOSTAL is a monitor-only DC battery. It must never enter the
+            # controllable battery pool; setup/polling still use this coordinator.
+            self.driver = KostalPlenticoreDriver(
+                self.host,
+                port=self.port,
+                slave_id=self.slave_id,
+                max_charge_power_w=self.configured_max_charge_power,
+                max_discharge_power_w=self.configured_max_discharge_power,
+            )
+        elif self.brand == "zendure":
             # Zendure's charge/discharge caps are read-only device traits, not
             # writable registers. The capability must stay the hardware ceiling
             # (driver default) — feeding the user-tunable max_charge_power here
