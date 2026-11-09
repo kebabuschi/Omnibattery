@@ -149,11 +149,16 @@ async def async_setup_entry(
         for definition in coordinator.sensor_definitions:
             entities.append(MarstekVenusSensor(coordinator, definition))
 
-    # Add aggregate sensors. Created even for a single-battery system so the
-    # "Marstek Venus System" device never exposes `unavailable` entities — with
-    # one battery each aggregate simply mirrors that battery's value.
+    # Aggregate sensors represent the controllable AC battery fleet. A
+    # monitor-only DC battery (e.g. KOSTAL/BYD) is exposed individually and
+    # must not be double-counted in the AC system aggregates.
+    control_coordinators = [
+        c for c in coordinators if not getattr(c.driver, "read_only", False)
+    ]
     for definition in AGGREGATE_SENSOR_DEFINITIONS:
-        entities.append(MarstekVenusAggregateSensor(coordinators, definition, entry, hass))
+        entities.append(
+            MarstekVenusAggregateSensor(control_coordinators, definition, entry, hass)
+        )
 
     # System alarm sensor — only for batteries that expose alarm/fault registers (v2)
     alarm_coordinators = [c for c in coordinators if c.capabilities.has_alarm_registers]
@@ -162,6 +167,8 @@ async def async_setup_entry(
 
     # Add calculated sensors (efficiency, stored energy, cycle count) per battery
     for coordinator in coordinators:
+        if getattr(coordinator.driver, "read_only", False):
+            continue
         for definition in EFFICIENCY_SENSOR_DEFINITIONS:
             entities.append(MarstekVenusEfficiencySensor(coordinator, definition))
         for definition in STORED_ENERGY_SENSOR_DEFINITIONS:
