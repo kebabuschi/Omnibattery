@@ -1741,6 +1741,10 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         interleave), health bookkeeping and the optional immediate refresh — that
         the former register-level ``write_register`` carried.
         """
+        if getattr(self.driver, "read_only", False):
+            _LOGGER.debug("[%s] Ignoring control write %s: driver is read-only", self.name, key)
+            return False
+
         # Keep direct writes to the manual setpoint entities below the live
         # configured ceiling as well as below the driver's static capability.
         # The number entity exposes the same limit in its slider metadata, but
@@ -1794,6 +1798,14 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         When ``read_back`` is False the set-points are applied optimistically and
         the regular poll refreshes ``battery_power``.
         """
+        if getattr(self.driver, "read_only", False):
+            return SetpointResult(
+                ok=False,
+                net_power_w=0,
+                confirmed=False,
+                failure_reason="read_only_driver",
+            )
+
         # ``apply_power`` is also used by manual time slots and software-manual
         # drivers, which do not go through a setpoint number entity. Enforce the
         # same effective per-direction ceiling at this common command boundary.
@@ -1856,6 +1868,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         (the reconnect re-assert) must call self.driver.set_rs485_control directly
         to avoid a deadlock.
         """
+        if getattr(self.driver, "read_only", False):
+            return False
         async with self.lock:
             try:
                 ok = await self.driver.set_rs485_control(enable)
@@ -1899,6 +1913,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         scaling; this wrapper only adds the per-coordinator infra (lock + health
         bookkeeping), matching write_control / set_rs485_control. No refresh.
         """
+        if getattr(self.driver, "read_only", False):
+            return False
         async with self.lock:
             try:
                 ok = await self.driver.apply_config(
@@ -1929,6 +1945,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         / apply_config. No refresh. Callers gate the v3 (no-register) case on
         capabilities.hardware_soc_cutoff, so a False here means the write failed.
         """
+        if getattr(self.driver, "read_only", False):
+            return False
         async with self.lock:
             try:
                 ok = await self.driver.set_charge_cutoff(soc_pct)
@@ -1951,6 +1969,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         stray poll cannot interleave. No health bookkeeping (the connection is
         about to close) and no refresh.
         """
+        if getattr(self.driver, "read_only", False):
+            return False
         async with self.lock:
             try:
                 return await self.driver.standby()
