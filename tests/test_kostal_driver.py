@@ -35,6 +35,7 @@ def test_float_decoder_supports_both_word_orders(swapped, value):
 
 def test_float_decoder_rejects_nan_and_infinity():
     client = KostalModbusClient("unused")
+    client._word_swapped_32bit = False
     for value in (float("nan"), float("inf"), float("-inf")):
         a, b = struct.unpack(">HH", struct.pack(">f", value))
         assert client._words_to_float([a, b]) is None
