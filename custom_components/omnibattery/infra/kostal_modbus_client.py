@@ -50,6 +50,10 @@ class KostalModbusClient:
         client = AsyncModbusTcpClient(self.host, port=self.port, timeout=_TIMEOUT_S)
         try:
             if not await client.connect():
+                try:
+                    client.close()
+                except Exception:
+                    pass
                 return False
             self._client = client
             self._slave_kwarg = self._detect_slave_kwarg(client)
@@ -99,6 +103,8 @@ class KostalModbusClient:
         except Exception as err:
             if not self._shutting_down:
                 _LOGGER.debug("KOSTAL read %s failed: %s", address, err)
+            return None
+        if result is None or not callable(getattr(result, "isError", None)):
             return None
         if result.isError():
             return None
