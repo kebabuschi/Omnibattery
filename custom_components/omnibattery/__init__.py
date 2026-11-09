@@ -10997,6 +10997,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     controller = ChargeDischargeController(
         hass, control_coordinators, entry.data["consumption_sensor"], entry
     )
+    controller.monitor_coordinators = [
+        coordinator for coordinator in coordinators
+        if getattr(coordinator.driver, "read_only", False)
+    ]
     # This is advisory only and is evaluated at setup and after option updates,
     # independently of grid-sensor health or the control loop.
     controller._check_solar_forecast_migration()
