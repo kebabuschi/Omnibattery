@@ -1,12 +1,8 @@
-"""KOSTAL PLENTICORE hybrid inverter / DC battery driver.
+"""Read-only KOSTAL PLENTICORE telemetry prototype.
 
-The PLENTICORE plus exposes external battery management through Modbus TCP.
-Omnibattery's signed power convention is +charge / -discharge; KOSTAL uses the
-opposite sign on register 1034, so the driver owns that translation.
-
-This driver deliberately talks to Modbus directly.  The official Home Assistant
-KOSTAL integration can remain installed for its existing entities and Energy
-Dashboard statistics.
+This prototype is intentionally not registered in Omnibattery's live coordinator
+or config flow. It only reads Modbus telemetry while register decoding is validated.
+The official Home Assistant KOSTAL integration can remain installed unchanged.
 """
 
 from __future__ import annotations
@@ -28,7 +24,6 @@ REG_SOC = 210
 REG_TEMPERATURE = 214
 REG_VOLTAGE = 216
 REG_BATTERY_POWER = 582
-REG_DC_SETPOINT = 1034
 
 _READ_GROUPS = [
     ReadGroup(scan_interval="high", keys=("battery_soc", "battery_power")),
