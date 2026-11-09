@@ -229,8 +229,8 @@ class KostalPlenticoreDriver(BatteryDriver):
         return False
 
     async def standby(self) -> bool:
-        """No-op in read-only mode: never write a zero setpoint."""
-        return True
+        """Report unsupported: read-only mode never writes a zero setpoint."""
+        return False
 
     async def set_rs485_control(self, enable: bool) -> bool:
         return False
