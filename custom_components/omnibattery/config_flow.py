@@ -154,7 +154,6 @@ from .drivers.zendure import (
 from .drivers.anker import AnkerModbusDriver
 from .drivers.sessy import SessyLocalDriver
 from .drivers.huawei import HuaweiSolarDriver
-from .drivers.kostal import KostalPlenticoreDriver
 from .drivers.hoymiles import (
     DEFAULT_HOYMILES_MODEL,
     HOYMILES_MODEL_PROFILES,
@@ -547,8 +546,9 @@ def _soc_selector_limits(brand: str) -> tuple[int, int, int, int, int, int]:
         min_lo, min_hi, min_default = 0, 30, _SESSY_DEFAULT_MIN_SOC
     elif brand == "hoymiles":
         min_lo, min_hi, min_default = 0, 30, 10
-    elif brand in ("huawei", "kostal"):
-        # Hybrid inverter battery: Omnibattery enforces its SOC window in software.
+    elif brand == "huawei":
+        # The inverter keeps its own discharge cutoff as a backstop; this window
+        # is what Omnibattery enforces on top of it.
         min_lo, min_hi, min_default = 0, 30, 10
     else:
         min_lo, min_hi, min_default = 12, 30, 12
@@ -1608,8 +1608,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 return await self.async_step_battery_connection_sessy()
             if brand == "huawei":
                 return await self.async_step_battery_connection_huawei()
-            if brand == "kostal":
-                return await self.async_step_battery_connection_kostal()
             return await self.async_step_battery_connection()
 
         return self.async_show_form(
@@ -1626,7 +1624,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                                 {"value": "sessy", "label": "Sessy"},
                                 {"value": "hoymiles", "label": "Hoymiles MQTT"},
                                 {"value": "huawei", "label": "Huawei SUN2000 + LUNA2000"},
-                                {"value": "kostal", "label": "KOSTAL PLENTICORE (external battery control)"},
                             ],
                             mode=SelectSelectorMode.DROPDOWN,
                         )),
@@ -1815,43 +1812,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 TextSelectorConfig(type=TextSelectorType.PASSWORD)
             ),
         }), errors=errors, description_placeholders={"battery_num": str(self.battery_index + 1)})
-
-    async def async_step_battery_connection_kostal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure a KOSTAL PLENTICORE hybrid inverter battery."""
-        errors = {}
-        battery_num = self.battery_index + 1
-        if user_input is not None:
-            host = (user_input[CONF_HOST] or "").strip()
-            port = int(user_input.get(CONF_PORT, 1502))
-            slave_id = int(user_input.get(CONF_SLAVE_ID, 71))
-            _LOGGER.info("Probing KOSTAL PLENTICORE at %s:%s slave %s", host, port, slave_id)
-            ok, model, serial = await KostalPlenticoreDriver.probe(host, port, slave_id)
-            if not ok:
-                errors["base"] = "cannot_connect"
-            else:
-                self._current_battery_data.update({
-                    CONF_NAME: user_input[CONF_NAME],
-                    CONF_HOST: host,
-                    CONF_PORT: port,
-                    CONF_SLAVE_ID: slave_id,
-                    "brand": "kostal",
-                    "kostal_model": model,
-                    "kostal_serial": serial,
-                })
-                return await self.async_step_battery_limits()
-
-        return self.async_show_form(
-            step_id="battery_connection_kostal",
-            data_schema=vol.Schema({
-                vol.Required(CONF_NAME, default=f"KOSTAL PLENTICORE {battery_num}"): str,
-                vol.Required(CONF_HOST): str,
-                vol.Optional(CONF_PORT, default=1502): int,
-                vol.Required(CONF_SLAVE_ID, default=71):
-                    vol.All(NumberSelector(NumberSelectorConfig(min=1, max=247, step=1, mode=NumberSelectorMode.BOX)), vol.Coerce(int)),
-            }),
-            errors=errors,
-            description_placeholders={"battery_num": str(battery_num)},
-        )
 
     async def async_step_battery_connection_huawei(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure a Huawei SUN2000 + LUNA2000.
@@ -2183,10 +2143,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             max_charge_power, max_discharge_power = _hoymiles_power_ceilings(self._current_battery_data)
         elif brand == "huawei":
             max_charge_power, max_discharge_power = _huawei_power_ceilings(self._current_battery_data)
-        elif brand == "kostal":
-            # Conservative G1 default; the user can lower this in the limits form.
-            max_charge_power = int(self._current_battery_data.get("device_max_charge_power") or 2800)
-            max_discharge_power = int(self._current_battery_data.get("device_max_discharge_power") or 2800)
         else:
             battery_version = self._current_battery_data.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
             max_charge_power = max_discharge_power = max_power_for_battery_version(
