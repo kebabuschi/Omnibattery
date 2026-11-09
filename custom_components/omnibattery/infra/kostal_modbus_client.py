@@ -123,11 +123,6 @@ class KostalModbusClient:
         value = struct.unpack(">f", raw)[0]
         return value if math.isfinite(value) else None
 
-    def _float_to_words(self, value: float) -> list[int]:
-        raw = struct.pack(">f", float(value))
-        first, second = struct.unpack(">HH", raw)
-        return [second, first] if self._word_swapped_32bit else [first, second]
-
     async def read_float(self, address: int) -> Optional[float]:
         words = await self.read_words(address, 2)
         return self._words_to_float(words) if words else None
@@ -143,24 +138,10 @@ class KostalModbusClient:
         words = await self.read_words(address, 1)
         return (words[0] & 0xFFFF) if words else None
 
-    async def write_float(self, address: int, value: float) -> bool:
-        words = self._float_to_words(value)
-        async with self._lock:
-            if not self.connected and not await self.async_connect():
-                return False
-            if self._client is None:
-                return False
-            kwargs = {self._slave_kwarg: self.unit_id}
-            try:
-                result = await asyncio.wait_for(
-                    self._client.write_registers(address=address, values=words, **kwargs),
-                    timeout=_TIMEOUT_S,
-                )
-                return not result.isError()
-            except Exception as err:
-                if not self._shutting_down:
-                    _LOGGER.warning("KOSTAL write %s failed: %s", address, err)
-                return False
-            finally:
-                if not self._shutting_down:
-                    await asyncio.sleep(_MESSAGE_WAIT_S)
+
+    async def read_u32(self, address: int) -> Optional[int]:
+        """Read KOSTAL battery identity U32 values in documented big-endian order."""
+        words = await self.read_words(address, 2)
+        if not words:
+            return None
+        return ((words[0] & 0xFFFF) << 16) | (words[1] & 0xFFFF)
