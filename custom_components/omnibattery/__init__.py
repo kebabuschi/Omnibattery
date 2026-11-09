@@ -10984,9 +10984,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         coordinators.append(coordinator)
 
-    # Set up the charge/discharge controller BEFORE storing in hass.data
-    # This allows the controller to register itself in hass.data[DOMAIN]["pid_controller"]
-    controller = ChargeDischargeController(hass, coordinators, entry.data["consumption_sensor"], entry)
+    # Read-only devices contribute telemetry but are never participants in
+    # power allocation. Keeping the full coordinator list preserves their
+    # individual sensor entities and lifecycle management.
+    control_coordinators = [
+        coordinator for coordinator in coordinators
+        if not getattr(coordinator.driver, "read_only", False)
+    ]
+
+    # Set up the charge/discharge controller BEFORE storing in hass.data.
+    # Monitor-only coordinators are deliberately excluded from every control path.
+    controller = ChargeDischargeController(
+        hass, control_coordinators, entry.data["consumption_sensor"], entry
+    )
     # This is advisory only and is evaluated at setup and after option updates,
     # independently of grid-sensor health or the control loop.
     controller._check_solar_forecast_migration()
@@ -11225,6 +11235,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinators": coordinators,
+        "control_coordinators": control_coordinators,
+        "monitor_coordinators": [
+            coordinator for coordinator in coordinators
+            if getattr(coordinator.driver, "read_only", False)
+        ],
         "controller": controller,
         "daily_operation_timeline": daily_operation_timeline,
         "unsub_control": unsub_control,
