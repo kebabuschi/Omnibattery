@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -53,22 +52,29 @@ def test_unsigned_32_bit_identity_conversion():
     assert asyncio.run(client.read_u32(527)) == 0x1234ABCD
 
 
-def _driver_with_fake_client():
-    client = AsyncMock()
-    client.connected = True
-    client.read_float = AsyncMock(side_effect={
-        210: 73.5,
-        214: 24.25,
-        216: 512.0,
-    }.get)
-    client.read_i16 = AsyncMock(return_value=1250)
-    client.read_words = AsyncMock(side_effect={
-        768: [0x504C, 0x454E, 0x5449, 0x434F, 0x5245, 0],
-        559: [0x494E, 0x5600],
-    }.get)
-    client.read_u32 = AsyncMock(side_effect={525: 1234, 527: 987654321}.get)
-    return client, KostalPlenticoreDriver("unused", client=client)
+class FakeKostalClient:
+    def __init__(self):
+        self.connected = True
+        self.read_float_values = {210: 73.5, 214: 24.25, 216: 512.0}
+        self.read_words_values = {768: [0x504C, 0x454E, 0x5449, 0x434F, 0x5245, 0], 559: [0x494E, 0x5600]}
+        self.read_u32_values = {525: 1234, 527: 987654321}
 
+    async def read_float(self, address):
+        return self.read_float_values.get(address)
+
+    async def read_i16(self, address):
+        return 1250
+
+    async def read_words(self, address, count):
+        return self.read_words_values.get(address)
+
+    async def read_u32(self, address):
+        return self.read_u32_values.get(address)
+
+
+def _driver_with_fake_client():
+    client = FakeKostalClient()
+    return client, KostalPlenticoreDriver('unused', client=client)
 
 def test_telemetry_normalizes_kostal_discharge_sign_and_reads_byd_identity():
     client, driver = _driver_with_fake_client()
@@ -76,11 +82,11 @@ def test_telemetry_normalizes_kostal_discharge_sign_and_reads_byd_identity():
     assert data["battery_soc"] == 73.5
     # KOSTAL positive = discharge; Omnibattery positive = charge.
     assert data["battery_power"] == -1250
-    assert data["battery_temperature"] == 24.25 or data["temperature"] == 24.25
+    assert data["temperature"] == 24.25
     assert data["battery_voltage"] == 512.0
     assert data["battery_model_id"] == 1234
     assert data["battery_serial"] == 987654321
-    client.read_u32.assert_any_await(527)
+    assert client.read_u32_values[527] == 987654321
 
 
 def test_apply_setpoint_refuses_commands_in_read_only_phase():
