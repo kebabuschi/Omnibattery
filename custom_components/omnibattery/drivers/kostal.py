@@ -31,7 +31,8 @@ _READ_GROUPS = [
 ]
 
 _CAPS_DEFAULT = DriverCapabilities(
-    hardware_soc_cutoff=True,
+    # No KOSTAL write register has been validated or implemented yet.
+    hardware_soc_cutoff=False,
     has_force_mode=False,
     push_telemetry=False,
     max_charge_power_w=2800,
@@ -85,6 +86,11 @@ class KostalPlenticoreDriver(BatteryDriver):
     @property
     def capabilities(self) -> DriverCapabilities:
         return self._capabilities
+
+    @property
+    def read_only(self) -> bool:
+        """This prototype must never be used as a controllable battery."""
+        return True
 
     @property
     def dc_coupled(self) -> bool:
@@ -213,20 +219,18 @@ class KostalPlenticoreDriver(BatteryDriver):
         return False
 
     def net_power_from_data(self, data: dict) -> Optional[int]:
-        value = data.get("commanded_net_power")
-        if value is not None:
-            try:
-                return int(round(float(value)))
-            except (TypeError, ValueError):
-                return None
-        return self._last_net_power_w
+        # There is no accepted hardware setpoint in read-only mode. Returning a
+        # cached/commanded value could make the controller incorrectly skip a
+        # future write when control support is eventually implemented.
+        return None
 
     @property
     def control_dependency_keys(self) -> frozenset:
         return frozenset({"battery_soc", "battery_power", "commanded_net_power"})
 
     async def apply_config(self, **_kwargs) -> bool:
-        return True
+        """Configuration writes are unsupported in the read-only prototype."""
+        return False
 
     async def set_charge_cutoff(self, soc_pct: float) -> bool:
         return False
