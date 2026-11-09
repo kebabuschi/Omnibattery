@@ -1,0 +1,273 @@
+"""KOSTAL PLENTICORE hybrid inverter / DC battery driver.
+
+The PLENTICORE plus exposes external battery management through Modbus TCP.
+Omnibattery's signed power convention is +charge / -discharge; KOSTAL uses the
+opposite sign on register 1034, so the driver owns that translation.
+
+This driver deliberately talks to Modbus directly.  The official Home Assistant
+KOSTAL integration can remain installed for its existing entities and Energy
+Dashboard statistics.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Optional
+
+from .base import BatteryDriver, DriverCapabilities, ReadGroup, SetpointResult, TelemetrySnapshot
+from ..infra.kostal_modbus_client import KostalModbusClient
+
+_LOGGER = logging.getLogger(__name__)
+
+REG_MODEL = 768
+REG_SERIAL = 559
+REG_SOC = 210
+REG_TEMPERATURE = 214
+REG_VOLTAGE = 216
+REG_BATTERY_POWER = 582
+REG_DC_SETPOINT = 1034
+
+_READ_GROUPS = [
+    ReadGroup(scan_interval="high", keys=("battery_soc", "battery_power")),
+    ReadGroup(scan_interval="low", keys=("battery_voltage", "temperature")),
+]
+
+_CAPS_DEFAULT = DriverCapabilities(
+    hardware_soc_cutoff=True,
+    has_force_mode=False,
+    push_telemetry=False,
+    max_charge_power_w=2800,
+    max_discharge_power_w=2800,
+    has_mppt_pv=False,
+    has_alarm_registers=False,
+    has_rs485_control=False,
+    has_energy_counters=False,
+    has_nominal_capacity=False,
+    has_daily_energy_counters=False,
+    setpoint_confirm_reliable=False,
+    actuator_latency_s=2.0,
+    readback_latency_s=2.0,
+    charge_cutoff_range=(50.0, 100.0),
+    discharge_cutoff_range=(0.0, 30.0),
+)
+
+
+def _decode_string(words: list[int]) -> Optional[str]:
+    raw = bytearray()
+    for word in words:
+        raw.extend(((word >> 8) & 0xFF, word & 0xFF))
+    text = raw.split(b"\x00")[0].decode("ascii", "replace").strip()
+    return text or None
+
+
+class KostalPlenticoreDriver(BatteryDriver):
+    """Native Modbus driver for a KOSTAL PLENTICORE hybrid battery."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 1502,
+        slave_id: int = 71,
+        *,
+        max_charge_power_w: int = 2800,
+        max_discharge_power_w: int = 2800,
+        client: Optional[KostalModbusClient] = None,
+    ) -> None:
+        self._client = client or KostalModbusClient(host, port, slave_id)
+        self._shutting_down = False
+        self._model: Optional[str] = None
+        self._serial: Optional[str] = None
+        self._last_net_power_w: Optional[int] = None
+        self._capabilities = DriverCapabilities(
+            **{**_CAPS_DEFAULT.__dict__,
+               "max_charge_power_w": max(100, int(max_charge_power_w)),
+               "max_discharge_power_w": max(100, int(max_discharge_power_w))}
+        )
+
+    @property
+    def capabilities(self) -> DriverCapabilities:
+        return self._capabilities
+
+    @property
+    def dc_coupled(self) -> bool:
+        return True
+
+    @property
+    def model_label(self) -> Optional[str]:
+        return self._model or "KOSTAL PLENTICORE"
+
+    @property
+    def serial(self) -> Optional[str]:
+        return self._serial
+
+    @property
+    def connected(self) -> bool:
+        return self._client.connected
+
+    @property
+    def read_groups(self) -> list[ReadGroup]:
+        return _READ_GROUPS
+
+    @property
+    def sensor_definitions(self) -> list[dict]:
+        return [
+            {"key": "battery_soc", "name": "Battery SOC", "scan_interval": "high"},
+            {"key": "battery_power", "name": "Battery Power", "scan_interval": "high"},
+            {"key": "battery_voltage", "name": "Battery Voltage", "scan_interval": "low"},
+            {"key": "temperature", "name": "Battery Temperature", "scan_interval": "low"},
+        ]
+
+    @property
+    def number_definitions(self) -> list[dict]:
+        return []
+
+    @property
+    def select_definitions(self) -> list[dict]:
+        return []
+
+    @property
+    def switch_definitions(self) -> list[dict]:
+        return []
+
+    @property
+    def binary_sensor_definitions(self) -> list[dict]:
+        return []
+
+    @property
+    def button_definitions(self) -> list[dict]:
+        return []
+
+    @property
+    def all_definitions(self) -> list[dict]:
+        return self.sensor_definitions
+
+    async def connect(self) -> bool:
+        if not await self._client.async_connect():
+            return False
+        identity = await self.read_telemetry(["device_model", "device_serial"])
+        self._model = identity.get("device_model") or self._model
+        self._serial = identity.get("device_serial") or self._serial
+        return True
+
+    async def close(self) -> None:
+        await self._client.async_close()
+
+    def set_shutting_down(self, value: bool) -> None:
+        self._shutting_down = bool(value)
+        self._client.set_shutting_down(value)
+
+    async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
+        wanted = set(keys or (
+            "battery_soc", "battery_power", "battery_voltage", "temperature",
+            "device_model", "device_serial",
+        ))
+        snapshot: TelemetrySnapshot = {}
+        if "battery_soc" in wanted:
+            value = await self._client.read_float(REG_SOC)
+            if value is not None:
+                snapshot["battery_soc"] = value
+        if "battery_power" in wanted:
+            value = await self._client.read_i16(REG_BATTERY_POWER)
+            if value is not None:
+                # KOSTAL: negative=charge, positive=discharge.
+                snapshot["battery_power"] = -value
+        if "battery_voltage" in wanted:
+            value = await self._client.read_float(REG_VOLTAGE)
+            if value is not None:
+                snapshot["battery_voltage"] = value
+        if "temperature" in wanted:
+            value = await self._client.read_float(REG_TEMPERATURE)
+            if value is not None:
+                snapshot["temperature"] = value
+        if "device_model" in wanted:
+            words = await self._client.read_words(REG_MODEL, 32)
+            if words:
+                snapshot["device_model"] = _decode_string(words)
+        if "device_serial" in wanted:
+            words = await self._client.read_words(REG_SERIAL, 16)
+            if words:
+                snapshot["device_serial"] = _decode_string(words)
+        return {key: value for key, value in snapshot.items() if value is not None}
+
+    async def apply_setpoint(
+        self, net_power_w: int, *, mode_hint: Optional[str] = None, read_back: bool = True
+    ) -> SetpointResult:
+        if net_power_w > 0:
+            applied = min(int(net_power_w), self._capabilities.max_charge_power_w)
+        elif net_power_w < 0:
+            applied = max(int(net_power_w), -self._capabilities.max_discharge_power_w)
+        else:
+            applied = 0
+
+        # Omnibattery +charge/-discharge -> KOSTAL -charge/+discharge.
+        ok = await self._client.write_float(REG_DC_SETPOINT, float(-applied))
+        if not ok:
+            return SetpointResult(False, applied, False, failure_reason="modbus_write_failed")
+
+        self._last_net_power_w = applied
+        if not read_back:
+            return SetpointResult(True, applied, False, applied={"commanded_net_power": applied})
+
+        await asyncio.sleep(0.1)
+        measured = await self._client.read_i16(REG_BATTERY_POWER)
+        measured_net = -measured if measured is not None else None
+        return SetpointResult(
+            True, applied, confirmed=False, exact=False,
+            battery_power_w=measured_net,
+            applied={
+                "commanded_net_power": applied,
+                **({"battery_power": measured_net} if measured_net is not None else {}),
+            },
+        )
+
+    async def write_control(self, key: str, value: int) -> bool:
+        return False
+
+    def net_power_from_data(self, data: dict) -> Optional[int]:
+        value = data.get("commanded_net_power")
+        if value is not None:
+            try:
+                return int(round(float(value)))
+            except (TypeError, ValueError):
+                return None
+        return self._last_net_power_w
+
+    @property
+    def control_dependency_keys(self) -> frozenset:
+        return frozenset({"battery_soc", "battery_power", "commanded_net_power"})
+
+    async def apply_config(self, **_kwargs) -> bool:
+        return True
+
+    async def set_charge_cutoff(self, soc_pct: float) -> bool:
+        return False
+
+    async def standby(self) -> bool:
+        # Explicitly neutralise the last command.  Once Omnibattery stops issuing
+        # keepalives the PLENTICORE's configured external-control timeout hands
+        # control back to its own battery manager.
+        result = await self.apply_setpoint(0, read_back=False)
+        if result.ok:
+            self._last_net_power_w = None
+        return result.ok
+
+    async def set_rs485_control(self, enable: bool) -> bool:
+        return False
+
+    async def get_rs485_control(self) -> Optional[bool]:
+        return None
+
+    @classmethod
+    async def probe(
+        cls, host: str, port: int = 1502, slave_id: int = 71
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        driver = cls(host, port, slave_id)
+        try:
+            if not await driver.connect():
+                return False, None, None
+            data = await driver.read_telemetry(["device_model", "battery_soc"])
+            model = data.get("device_model")
+            return bool(model or "battery_soc" in data), model, driver.serial
+        finally:
+            await driver.close()
