@@ -38,22 +38,28 @@ async def main() -> int:
     args = parser.parse_args()
 
     client = AsyncModbusTcpClient(args.host, port=args.port, timeout=8)
-    if not await client.connect():
-        print(f"Connection failed: {args.host}:{args.port}")
-        return 2
-
-    method = client.read_holding_registers
-    params = inspect.signature(method).parameters
-    unit_key = next((key for key in ("slave", "unit", "dev_id", "device_id") if key in params), "slave")
-
-    async def read(address: int, count: int = 1) -> list[int] | None:
-        response = await method(address=address, count=count, **{unit_key: args.unit})
-        if response.isError():
-            return None
-        values = getattr(response, "registers", None)
-        return list(values[:count]) if values is not None and len(values) >= count else None
-
     try:
+        if not await client.connect():
+            print(f"Connection failed: {args.host}:{args.port}")
+            return 2
+
+        method = client.read_holding_registers
+        params = inspect.signature(method).parameters
+        unit_key = next((key for key in ("slave", "unit", "dev_id", "device_id") if key in params), "slave")
+
+        async def read(address: int, count: int = 1) -> list[int] | None:
+            try:
+                response = await method(address=address, count=count, **{unit_key: args.unit})
+            except Exception as err:
+                print(f"Modbus read failed (register {address}): {err}")
+                return None
+            if response is None or not callable(getattr(response, "isError", None)):
+                return None
+            if response.isError():
+                return None
+            values = getattr(response, "registers", None)
+            return list(values[:count]) if values is not None and len(values) >= count else None
+
         order = await read(5)
         if not order:
             print("Could not read register 5 (32-bit word order); aborting.")
