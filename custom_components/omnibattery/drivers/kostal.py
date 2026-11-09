@@ -11,8 +11,8 @@ Dashboard statistics.
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from dataclasses import replace
 from typing import Optional
 
 from .base import BatteryDriver, DriverCapabilities, ReadGroup, SetpointResult, TelemetrySnapshot
@@ -21,7 +21,9 @@ from ..infra.kostal_modbus_client import KostalModbusClient
 _LOGGER = logging.getLogger(__name__)
 
 REG_MODEL = 768
-REG_SERIAL = 559
+REG_INVERTER_SERIAL = 559
+REG_BATTERY_MODEL_ID = 525
+REG_BATTERY_SERIAL = 527
 REG_SOC = 210
 REG_TEMPERATURE = 214
 REG_VOLTAGE = 216
@@ -79,10 +81,10 @@ class KostalPlenticoreDriver(BatteryDriver):
         self._model: Optional[str] = None
         self._serial: Optional[str] = None
         self._last_net_power_w: Optional[int] = None
-        self._capabilities = DriverCapabilities(
-            **{**_CAPS_DEFAULT.__dict__,
-               "max_charge_power_w": max(100, int(max_charge_power_w)),
-               "max_discharge_power_w": max(100, int(max_discharge_power_w))}
+        self._capabilities = replace(
+            _CAPS_DEFAULT,
+            max_charge_power_w=max(100, int(max_charge_power_w)),
+            max_discharge_power_w=max(100, int(max_discharge_power_w)),
         )
 
     @property
@@ -160,7 +162,7 @@ class KostalPlenticoreDriver(BatteryDriver):
     async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
         wanted = set(keys or (
             "battery_soc", "battery_power", "battery_voltage", "temperature",
-            "device_model", "device_serial",
+            "device_model", "inverter_serial", "battery_model_id", "battery_serial",
         ))
         snapshot: TelemetrySnapshot = {}
         if "battery_soc" in wanted:
@@ -184,41 +186,29 @@ class KostalPlenticoreDriver(BatteryDriver):
             words = await self._client.read_words(REG_MODEL, 32)
             if words:
                 snapshot["device_model"] = _decode_string(words)
-        if "device_serial" in wanted:
-            words = await self._client.read_words(REG_SERIAL, 16)
+        if "inverter_serial" in wanted:
+            words = await self._client.read_words(REG_INVERTER_SERIAL, 16)
             if words:
-                snapshot["device_serial"] = _decode_string(words)
+                snapshot["inverter_serial"] = _decode_string(words)
+        if "battery_model_id" in wanted:
+            value = await self._client.read_u32(REG_BATTERY_MODEL_ID)
+            if value is not None:
+                snapshot["battery_model_id"] = value
+        if "battery_serial" in wanted:
+            value = await self._client.read_u32(REG_BATTERY_SERIAL)
+            if value is not None:
+                snapshot["battery_serial"] = value
         return {key: value for key, value in snapshot.items() if value is not None}
 
     async def apply_setpoint(
         self, net_power_w: int, *, mode_hint: Optional[str] = None, read_back: bool = True
     ) -> SetpointResult:
-        if net_power_w > 0:
-            applied = min(int(net_power_w), self._capabilities.max_charge_power_w)
-        elif net_power_w < 0:
-            applied = max(int(net_power_w), -self._capabilities.max_discharge_power_w)
-        else:
-            applied = 0
-
-        # Omnibattery +charge/-discharge -> KOSTAL -charge/+discharge.
-        ok = await self._client.write_float(REG_DC_SETPOINT, float(-applied))
-        if not ok:
-            return SetpointResult(False, applied, False, failure_reason="modbus_write_failed")
-
-        self._last_net_power_w = applied
-        if not read_back:
-            return SetpointResult(True, applied, False, applied={"commanded_net_power": applied})
-
-        await asyncio.sleep(0.1)
-        measured = await self._client.read_i16(REG_BATTERY_POWER)
-        measured_net = -measured if measured is not None else None
+        """Refuse all control commands during the read-only development phase."""
         return SetpointResult(
-            True, applied, confirmed=False, exact=False,
-            battery_power_w=measured_net,
-            applied={
-                "commanded_net_power": applied,
-                **({"battery_power": measured_net} if measured_net is not None else {}),
-            },
+            False,
+            int(net_power_w),
+            False,
+            failure_reason="read_only_test_driver",
         )
 
     async def write_control(self, key: str, value: int) -> bool:
@@ -244,13 +234,8 @@ class KostalPlenticoreDriver(BatteryDriver):
         return False
 
     async def standby(self) -> bool:
-        # Explicitly neutralise the last command.  Once Omnibattery stops issuing
-        # keepalives the PLENTICORE's configured external-control timeout hands
-        # control back to its own battery manager.
-        result = await self.apply_setpoint(0, read_back=False)
-        if result.ok:
-            self._last_net_power_w = None
-        return result.ok
+        """No-op in read-only mode: never write a zero setpoint."""
+        return True
 
     async def set_rs485_control(self, enable: bool) -> bool:
         return False
