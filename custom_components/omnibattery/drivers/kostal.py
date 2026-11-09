@@ -147,9 +147,9 @@ class KostalPlenticoreDriver(BatteryDriver):
     async def connect(self) -> bool:
         if not await self._client.async_connect():
             return False
-        identity = await self.read_telemetry(["device_model", "device_serial"])
+        identity = await self.read_telemetry(["device_model", "battery_model_id", "battery_serial"])
         self._model = identity.get("device_model") or self._model
-        self._serial = identity.get("device_serial") or self._serial
+        self._serial = str(identity["battery_serial"]) if identity.get("battery_serial") is not None else self._serial
         return True
 
     async def close(self) -> None:
@@ -251,7 +251,7 @@ class KostalPlenticoreDriver(BatteryDriver):
         try:
             if not await driver.connect():
                 return False, None, None
-            data = await driver.read_telemetry(["device_model", "battery_soc"])
+            data = await driver.read_telemetry(["device_model", "battery_soc", "battery_model_id", "battery_serial"])
             model = data.get("device_model")
             return bool(model or "battery_soc" in data), model, driver.serial
         finally:
