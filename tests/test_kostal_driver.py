@@ -103,7 +103,8 @@ def test_apply_setpoint_refuses_commands_in_read_only_phase():
 
 def test_standby_is_a_noop_in_read_only_phase():
     client, driver = _driver_with_fake_client()
-    assert asyncio.run(driver.standby()) is True
+    # A no-op must not be reported as a successfully executed standby command.
+    assert asyncio.run(driver.standby()) is False
     assert not hasattr(client, "write_float")
     assert not hasattr(client, "write_registers")
 
