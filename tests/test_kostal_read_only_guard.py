@@ -23,6 +23,7 @@ def _coordinator():
     )
     coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
     coordinator.driver = driver
+    coordinator.name = "KOSTAL test fixture"
     return coordinator, driver
 
 
