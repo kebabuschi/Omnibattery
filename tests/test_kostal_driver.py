@@ -114,3 +114,11 @@ def test_read_only_driver_has_expected_identity_and_limits():
     assert driver.dc_coupled is True
     assert driver.capabilities.max_charge_power_w == 2800
     assert driver.capabilities.max_discharge_power_w == 2800
+
+
+def test_zero_battery_identity_registers_are_omitted():
+    client, driver = _driver_with_fake_client()
+    client.read_u32_values = {525: 0, 527: 0}
+    data = asyncio.run(driver.read_telemetry())
+    assert "battery_model_id" not in data
+    assert "battery_serial" not in data
