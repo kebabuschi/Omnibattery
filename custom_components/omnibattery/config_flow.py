@@ -154,6 +154,7 @@ from .drivers.zendure import (
 from .drivers.anker import AnkerModbusDriver
 from .drivers.sessy import SessyLocalDriver
 from .drivers.huawei import HuaweiSolarDriver
+from .drivers.kostal import KostalPlenticoreDriver
 from .drivers.hoymiles import (
     DEFAULT_HOYMILES_MODEL,
     HOYMILES_MODEL_PROFILES,
@@ -1608,6 +1609,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 return await self.async_step_battery_connection_sessy()
             if brand == "huawei":
                 return await self.async_step_battery_connection_huawei()
+            if brand == "kostal":
+                return await self.async_step_battery_connection_kostal()
             return await self.async_step_battery_connection()
 
         return self.async_show_form(
@@ -1624,6 +1627,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                                 {"value": "sessy", "label": "Sessy"},
                                 {"value": "hoymiles", "label": "Hoymiles MQTT"},
                                 {"value": "huawei", "label": "Huawei SUN2000 + LUNA2000"},
+                                {"value": "kostal", "label": "KOSTAL PLENTICORE (monitor only)"},
                             ],
                             mode=SelectSelectorMode.DROPDOWN,
                         )),
@@ -1706,6 +1710,47 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                         )),
                 }
             ),
+            errors=errors,
+            description_placeholders={"battery_num": str(battery_num)},
+        )
+
+    async def async_step_battery_connection_kostal(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure KOSTAL PLENTICORE telemetry without enabling control."""
+        errors: dict[str, str] = {}
+        battery_num = self.battery_index + 1
+        if user_input is not None:
+            host = (user_input[CONF_HOST] or "").strip()
+            port = int(user_input.get(CONF_PORT, 1502))
+            slave_id = int(user_input.get(CONF_SLAVE_ID, 71))
+            ok, model, _serial = await KostalPlenticoreDriver.probe(
+                host, port, slave_id
+            )
+            if not ok:
+                errors["base"] = "cannot_connect"
+            else:
+                self._current_battery_data.update({
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_SLAVE_ID: slave_id,
+                    "brand": "kostal",
+                    "kostal_model": model or "PLENTICORE",
+                })
+                return await self.async_step_battery_limits()
+
+        return self.async_show_form(
+            step_id="battery_connection_kostal",
+            data_schema=vol.Schema({
+                vol.Required(CONF_NAME, default=f"KOSTAL PLENTICORE {battery_num}"): str,
+                vol.Required(CONF_HOST): str,
+                vol.Optional(CONF_PORT, default=1502): int,
+                vol.Required(CONF_SLAVE_ID, default=71):
+                    vol.All(NumberSelector(NumberSelectorConfig(
+                        min=1, max=247, step=1, mode=NumberSelectorMode.BOX
+                    )), vol.Coerce(int)),
+            }),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
         )
