@@ -11,6 +11,6 @@ pytest-homeassistant-custom-component
 
 # Runtime requirement from manifest.json. The integration's package __init__
 # imports pymodbus at module load, so it must be present to import any submodule.
-pymodbus>=3.5.0
+pymodbus>=3.8.0
 pyserial
 voluptuous-serialize
