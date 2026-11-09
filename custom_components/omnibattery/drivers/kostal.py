@@ -144,7 +144,10 @@ class KostalPlenticoreDriver(BatteryDriver):
             return False
         identity = await self.read_telemetry(["device_model", "battery_model_id", "battery_serial"])
         self._model = identity.get("device_model") or self._model
-        self._serial = str(identity["battery_serial"]) if identity.get("battery_serial") is not None else self._serial
+        battery_serial = identity.get("battery_serial")
+        # Some PLENTICORE firmware returns zero for unavailable battery identity
+        # registers; never publish that as a real serial.
+        self._serial = str(battery_serial) if battery_serial not in (None, 0) else self._serial
         return True
 
     async def close(self) -> None:
@@ -187,11 +190,11 @@ class KostalPlenticoreDriver(BatteryDriver):
                 snapshot["inverter_serial"] = _decode_string(words)
         if "battery_model_id" in wanted:
             value = await self._client.read_u32(REG_BATTERY_MODEL_ID)
-            if value is not None:
+            if value not in (None, 0):
                 snapshot["battery_model_id"] = value
         if "battery_serial" in wanted:
             value = await self._client.read_u32(REG_BATTERY_SERIAL)
-            if value is not None:
+            if value not in (None, 0):
                 snapshot["battery_serial"] = value
         return {key: value for key, value in snapshot.items() if value is not None}
 
