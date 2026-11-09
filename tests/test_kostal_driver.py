@@ -49,6 +49,7 @@ def test_signed_16_bit_conversion(raw, expected):
 
 
 def test_unsigned_32_bit_identity_conversion():
+    # The BYD identity register pair is decoded as an unsigned 32-bit integer.
     client = KostalModbusClient("unused")
     client.read_words = AsyncMock(return_value=[0x1234, 0xABCD])
     assert asyncio.run(client.read_u32(527)) == 0x1234ABCD
