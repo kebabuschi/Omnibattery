@@ -115,6 +115,11 @@ def test_read_only_driver_has_expected_identity_and_limits():
     assert driver.capabilities.max_charge_power_w == 2800
     assert driver.capabilities.max_discharge_power_w == 2800
 
+    assert driver.read_only is True
+    assert driver.capabilities.hardware_soc_cutoff is False
+    assert driver.net_power_from_data({"commanded_net_power": 500}) is None
+    assert asyncio.run(driver.apply_config(max_soc_pct=100)) is False
+
 
 def test_zero_battery_identity_registers_are_omitted():
     client, driver = _driver_with_fake_client()
