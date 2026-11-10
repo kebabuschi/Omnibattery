@@ -10957,8 +10957,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # taper/hysteresis machinery. The device is the source of truth and
             # the coordinator syncs soc_set/min_soc back from the poll.
             if _device_owns_initial_config(coordinator.brand):
-                _LOGGER.info("Skipping initial SOC config write for %s (registerless driver; device flash holds the user values)",
-                           battery_config[CONF_NAME])
+                _LOGGER.info(
+                    "Skipping initial battery configuration write for %s "
+                    "(device-owned configuration or monitor-only driver)",
+                    battery_config[CONF_NAME],
+                )
             else:
                 max_charge_power = int(battery_config["max_charge_power"])
                 max_discharge_power = int(battery_config["max_discharge_power"])
