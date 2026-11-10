@@ -10392,8 +10392,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 def _device_owns_initial_config(brand: str) -> bool:
-    """Return whether setup must preserve configuration stored by the device."""
-    return brand == "zendure"
+    """Return whether setup must not push battery configuration to hardware."""
+    # Zendure stores its SOC limits in device flash. KOSTAL is explicitly
+    # monitor-only: the PLENTICORE remains the sole owner of BYD operation.
+    return brand in ("zendure", "kostal")
 
 
 _LEGACY_ACTIVE_BALANCE_PREFIX = "active_balance_mode_"
@@ -10955,8 +10957,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # taper/hysteresis machinery. The device is the source of truth and
             # the coordinator syncs soc_set/min_soc back from the poll.
             if _device_owns_initial_config(coordinator.brand):
-                _LOGGER.info("Skipping initial SOC config write for %s (registerless driver; device flash holds the user values)",
-                           battery_config[CONF_NAME])
+                _LOGGER.info(
+                    "Skipping initial battery configuration write for %s "
+                    "(device-owned configuration or monitor-only driver)",
+                    battery_config[CONF_NAME],
+                )
             else:
                 max_charge_power = int(battery_config["max_charge_power"])
                 max_discharge_power = int(battery_config["max_discharge_power"])
@@ -10984,9 +10989,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         coordinators.append(coordinator)
 
-    # Set up the charge/discharge controller BEFORE storing in hass.data
-    # This allows the controller to register itself in hass.data[DOMAIN]["pid_controller"]
-    controller = ChargeDischargeController(hass, coordinators, entry.data["consumption_sensor"], entry)
+    # Read-only devices contribute telemetry but are never participants in
+    # power allocation. Keeping the full coordinator list preserves their
+    # individual sensor entities and lifecycle management.
+    control_coordinators = [
+        coordinator for coordinator in coordinators
+        if not getattr(coordinator.driver, "read_only", False)
+    ]
+
+    # Set up the charge/discharge controller BEFORE storing in hass.data.
+    # Monitor-only coordinators are deliberately excluded from every control path.
+    controller = ChargeDischargeController(
+        hass, control_coordinators, entry.data["consumption_sensor"], entry
+    )
     # This is advisory only and is evaluated at setup and after option updates,
     # independently of grid-sensor health or the control loop.
     controller._check_solar_forecast_migration()
