@@ -1,8 +1,9 @@
-"""Read-only KOSTAL PLENTICORE telemetry prototype.
+"""Read-only telemetry driver for KOSTAL PLENTICORE hybrid inverters.
 
-This prototype is intentionally not registered in Omnibattery's live coordinator
-or config flow. It only reads Modbus telemetry while register decoding is validated.
-The official Home Assistant KOSTAL integration can remain installed unchanged.
+The driver reads BYD battery telemetry over Modbus TCP. It deliberately exposes
+no write transport or control capability: the PLENTICORE remains responsible
+for operating its DC-coupled battery. The official Home Assistant KOSTAL
+integration can remain installed unchanged.
 """
 
 from __future__ import annotations
