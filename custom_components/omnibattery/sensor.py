@@ -221,7 +221,7 @@ async def async_setup_entry(
         entities.append(DailyOperationTimelineSensor(controller))
 
     if controller:
-        entities.append(ActiveBatteriesSensor(hass, entry, controller, coordinators))
+        entities.append(ActiveBatteriesSensor(hass, entry, controller, control_coordinators))
 
     # Add the three-phase protection status and per-phase diagnostic sensor.
     if controller:
@@ -251,7 +251,7 @@ async def async_setup_entry(
 
     # Add non-responsive batteries sensor (always, when controller is present)
     if controller:
-        entities.append(NonResponsiveBatteriesSensor(hass, entry, controller, coordinators))
+        entities.append(NonResponsiveBatteriesSensor(hass, entry, controller, control_coordinators))
 
     # Add daily grid-at-min-soc energy sensor (feeds into consumption estimation)
     if controller:
