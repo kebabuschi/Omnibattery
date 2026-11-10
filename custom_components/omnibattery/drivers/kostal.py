@@ -116,10 +116,46 @@ class KostalPlenticoreDriver(BatteryDriver):
     @property
     def sensor_definitions(self) -> list[dict]:
         return [
-            {"key": "battery_soc", "name": "Battery SOC", "scan_interval": "high"},
-            {"key": "battery_power", "name": "Battery Power", "scan_interval": "high"},
-            {"key": "battery_voltage", "name": "Battery Voltage", "scan_interval": "low"},
-            {"key": "temperature", "name": "Battery Temperature", "scan_interval": "low"},
+            {
+                "key": "battery_soc",
+                "name": "Battery SOC",
+                "unit": "%",
+                "device_class": "battery",
+                "state_class": "measurement",
+                "precision": 1,
+                "scan_interval": "high",
+                "enabled_by_default": True,
+            },
+            {
+                "key": "battery_power",
+                "name": "Battery Power",
+                "unit": "W",
+                "device_class": "power",
+                "state_class": "measurement",
+                "precision": 0,
+                "scan_interval": "high",
+                "enabled_by_default": True,
+            },
+            {
+                "key": "battery_voltage",
+                "name": "Battery Voltage",
+                "unit": "V",
+                "device_class": "voltage",
+                "state_class": "measurement",
+                "precision": 1,
+                "scan_interval": "low",
+                "enabled_by_default": True,
+            },
+            {
+                "key": "temperature",
+                "name": "Battery Temperature",
+                "unit": "°C",
+                "device_class": "temperature",
+                "state_class": "measurement",
+                "precision": 1,
+                "scan_interval": "low",
+                "enabled_by_default": True,
+            },
         ]
 
     @property
