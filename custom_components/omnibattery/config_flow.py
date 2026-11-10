@@ -4126,6 +4126,8 @@ class OptionsFlowHandler(OptionsFlow):
                 return await self.async_step_battery_connection_huawei()
             if brand == "hoymiles":
                 return await self.async_step_battery_connection_hoymiles()
+            if brand == "kostal":
+                return await self.async_step_battery_connection_kostal()
             return await self.async_step_battery_connection()
 
         return self.async_show_form(
@@ -4142,11 +4144,63 @@ class OptionsFlowHandler(OptionsFlow):
                                 {"value": "sessy", "label": "Sessy"},
                                 {"value": "hoymiles", "label": "Hoymiles MQTT"},
                                 {"value": "huawei", "label": "Huawei SUN2000 + LUNA2000"},
+                                {"value": "kostal", "label": "KOSTAL PLENTICORE (monitor only)"},
                             ],
                             mode=SelectSelectorMode.DROPDOWN,
                         )),
                 }
             ),
+            description_placeholders={"battery_num": str(battery_num)},
+        )
+
+    async def async_step_battery_connection_kostal(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure read-only KOSTAL PLENTICORE telemetry in the options flow."""
+        errors: dict[str, str] = {}
+        battery_num = self.battery_index + 1
+        current_batteries = self.config_entry.data.get("batteries", [])
+
+        if user_input is not None:
+            host = (user_input[CONF_HOST] or "").strip()
+            port = int(user_input.get(CONF_PORT, 1502))
+            slave_id = int(user_input.get(CONF_SLAVE_ID, 71))
+            ok, model, _serial = await KostalPlenticoreDriver.probe(
+                host, port, slave_id
+            )
+            if not ok:
+                errors["base"] = "cannot_connect"
+            else:
+                self._current_battery_data.update({
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_SLAVE_ID: slave_id,
+                    "brand": "kostal",
+                    "kostal_model": model or "PLENTICORE",
+                })
+                return await self.async_step_battery_limits()
+
+        if self.battery_index < len(current_batteries):
+            current = current_batteries[self.battery_index]
+        else:
+            current = {}
+
+        return self.async_show_form(
+            step_id="battery_connection_kostal",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_NAME,
+                    default=current.get(CONF_NAME, f"KOSTAL PLENTICORE {battery_num}"),
+                ): str,
+                vol.Required(CONF_HOST, default=current.get(CONF_HOST, "")): str,
+                vol.Optional(CONF_PORT, default=current.get(CONF_PORT, 1502)): int,
+                vol.Required(CONF_SLAVE_ID, default=current.get(CONF_SLAVE_ID, 71)):
+                    vol.All(NumberSelector(NumberSelectorConfig(
+                        min=1, max=247, step=1, mode=NumberSelectorMode.BOX
+                    )), vol.Coerce(int)),
+            }),
+            errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
         )
 
